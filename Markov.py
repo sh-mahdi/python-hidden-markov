@@ -19,6 +19,12 @@ class Probability(object):
         self.Numerator+=deltaN
         self.Denominator+=deltaD
 
+    def __iadd__(self,Prob2):
+        """Updates the probability given another Probability object"""
+        self.Numerator+=Prob2.Numerator
+        self.Denominator+=Prob2.Denominator
+        return self
+
 class Distribution(object):
     """ Represents a probability distribution over a set of categories"""
     def __init__(self,categories,k=0):
@@ -38,6 +44,10 @@ class Distribution(object):
     def __call__(self,item):
         """Gives the probability of item"""
         return self.Probs[item]()
+
+    def __mult__(self,scalar):
+        """Returns the probability of each item, multiplied by a scalar"""
+        return dict([(item,self.Probs[item]()*scalar) for item in self.Probs])
 
     def Update(self,categories):
         """Updates each category in the probability distiribution, according to
@@ -109,7 +119,25 @@ class BayesianModel(object):
         self.Prior=Prior
         self.Conditionals=Conditionals
 
-    
+    def __call__(self,PriorProbs=None):
+        """Returns a Distribution representing the probabilities of the outcomes
+           given a particular distribution of the priors, which defaults to
+           self.Prior"""
+        if PriorProbs==None:
+            PriorProbs=self.Prior
+        Outcomes={}
+        for state in PriorProbs:
+            posterior=self.Conditionals[state]*self.Priors(state)
+            for outcome in posterior:
+                Outcomes.setdefault(outcome,0.0)
+                Outcomes[outcome]+=posterior[outcome]
+        return Distribution(outcomes)
+
+    def PriorProbs(self,Observations):
+        """Returns a Distribution representing the probabilities of the prior
+           states, given a probability Distribution of Observations"""
+        return Distribution((((state,self.Priors(state)*sum((self.Conditionals[state][outcome]()*Observations[outcome]() for outcome in Observations)) for state in self.Priors))))
+        
         
 
 class HMM(BayesianModel):
