@@ -1,5 +1,7 @@
-import numpy
+import scipy
+import scipy.special
 import random
+import math
 
 """Library to implement hidden Markov Models"""
 class Probability(object):
@@ -49,6 +51,15 @@ class Distribution(object):
         """Returns the probability of each item, multiplied by a scalar"""
         return dict([(item,self.Probs[item]()*scalar) for item in self.Probs])
 
+    def __iadd__(self,Dist2):
+        """Updates the Distribution given another Distribution with the same states"""
+        for state in self.Probs:
+            self.Probs[state]+=Dist2.Probs[state]
+
+    def copy(self):
+        """Returns a copy of the Distribution"""
+        return Distribution(dict(((state,self(state)) for state in self.Probs)))
+    
     def Update(self,categories):
         """Updates each category in the probability distiribution, according to
            a dictionary of numerator and denominator values"""
@@ -70,7 +81,20 @@ class Distribution(object):
         return result
 
     def States(self):
-        return [state for state in self.Probs]
+        """Yields the Distribution's states"""
+        for state in self.Probs:
+            yield state
+
+    def MaximumLikelihoodState(self):
+        """Returns the state with the greatest likelihood"""
+        result=None
+        Best=0
+        for state in self.Probs:
+            P=self(state)
+            if P>Best:
+                result=state
+                Best=P
+        return result
 
 class PoissonDistribution(Distribution):
     """Represents a Poisson distribution"""
@@ -81,12 +105,11 @@ class PoissonDistribution(Distribution):
 
     def __call__(self,N):
         """Returns the probability of N"""
-        logProb=numpy.ln(self.Numerator)-numpy.ln(self.Denominator)
+        logProb=scipy.log(self.Numerator)-scipy.log(self.Denominator)
         logProb*=N
         logProb-=(self.Numerator/self.Denominator)
-        for i in range(2,N+1):
-            logProb-=numpy.ln(i)
-        return numpy.exp(logProb)
+        logProb-=scipy.special.gammaln(N+1)
+        return scipy.exp(logProb)
 
     def Update(self,N,p=1.0):
         """Updates the distribution, given a value N that has a probability of P
@@ -95,7 +118,12 @@ class PoissonDistribution(Distribution):
         self.Denominator+=p
 
     def Mean(self):
+        """Returnns the Mean of the PoissonDistribution"""
         return self.Numerator/self.Denominator
+
+    def copy(self):
+        """Returns a copy of the PoissonDistribution"""
+        return PoissonDistribution(self.Mean)
 
     def Sample(self):
         """Returns a random sample from the Poisson distribution"""
@@ -110,6 +138,21 @@ class PoissonDistribution(Distribution):
                 n+=1
                 p-=x
         return n
+
+    def States(self,limit=0.0000001):
+        """Yields the PoissonDistribution's states, up to a cumulative
+           probability of 1-limit"""
+        p=1.0
+        n=0
+        while p>limit:
+            x=self(n)
+            yield n
+            n+=1
+            p-=x
+
+    def MaximumLikelihoodState(self):
+        return math.ceil(self.Numerator/self.Denominator)-1
+        
 
 class BayesianModel(object):
     """Represents a Bayesian probability model"""
@@ -126,28 +169,104 @@ class BayesianModel(object):
         if PriorProbs==None:
             PriorProbs=self.Prior
         Outcomes={}
-        for state in PriorProbs:
-            posterior=self.Conditionals[state]*self.Priors(state)
+        for state in PriorProbs.States():
+            posterior=self.Conditionals[state]*PriorProbs(state)
             for outcome in posterior:
                 Outcomes.setdefault(outcome,0.0)
                 Outcomes[outcome]+=posterior[outcome]
         return Distribution(outcomes)
 
+    def __iadd__(self,Model2):
+        """Updates the BayesianModel with the data in another BayesianModel"""
+        self.Prior+=Model2.Prior
+        for state in self.Conditionals:
+            self.Conditionals[state]+=Model2.Conditionals[state]
+        return self
+
     def PriorProbs(self,Observations):
         """Returns a Distribution representing the probabilities of the prior
            states, given a probability Distribution of Observations"""
-        return Distribution((((state,self.Priors(state)*sum((self.Conditionals[state][outcome]()*Observations[outcome]() for outcome in Observations)) for state in self.Priors))))
+        return Distribution((((state,self.Priors(state)*sum((self.Conditionals[state](outcome)*Observations(outcome) for outcome in Observations.States())) for state in self.Priors))))
         
-        
+    def MaximumLikelihoodOutcome(self,PriorProbs=None):
+        """Returns the maximum likelihood outcome given PriorProbs"""
+        return self(PriorProbs).MaximumLikelihoodState()
+
+    def MaximumLikelihoodState(self,Observations=None)
+        """Returns the maximum likelihood of the internal state. If Observations
+           is None, defaults to the maximum likelihood of the Prior"""
+        Probs=self.Prior
+        if Observations!=None:
+            Probs=self.PriorProbs(Observations)
+        return Probs.MaximumLikelihoodState()
+
+    def Outcomes(self):
+        """Returns an iterator over the possible outcomes"""
+        return self().States()
+
+    def States(self):
+        """Returns an iterator over the possible states"""
+        return self.Prior.States()
+
 
 class HMM(BayesianModel):
     """Represents a Hidden Markov Model"""
     def __init__(self,states,outcomes):
         """states is a list or dictionary of states, outcomes is a dictionary
-           mapping each state in states to a distribution of the output states"""
+           mapping each state in states to a Distribution of the output states"""
         super(HMM,self).__init__(Distribution(states,1),outcomes)
-        states=self.Prior.States()
-        self.TransitionProbs=BayesianModel(states,dict([(state,Distribution(states)) for state in states]))
+        self.TransitionProbs=BayesianModel(Distribution(states,1),dict([(state,Distribution(states,1)) for state in states]))
+        self.Current=None
+        self.Previous=None
+
+    def __call__(self,PriorProbs=None):
+        """Returns a Distribution of outcomes given PriorProbs, which defaults
+           to self.Current if it is set, or self.Prior otherwise"""
+        if PriorProbs==None:
+            PriorProbs=self.Current
+        return super(HMM,self)(PriorProbs)
+
+    def Predict(self):
+        """Returns a Distribution representing the probabilities of the next
+           state given the current state"""
+        if self.Current==None:
+            self.Previous=self.Prior.copy()
+        else:
+            self.Previous=self.Current.copy()
+        self.Current=self.TransitionProbs(self.Current)
+        return self.Current
+
+    def PriorProbs(self,Observations):
+        """Returns a Distribution the prior probabilities of the HMM's states
+           given a Distribution of Observations"""
+        self.Current=super(HMM,self).PriorProbs(Observations)
+        return self.Current
+
+    def Update(self,Observations):
+        """Updates the Prior probabilities, TransitionProbs
+           and Conditionals given Observations"""
+        self.Predict()
+        self.PriorProbs(Observations)
+        self.Prior+=self.Current
+        self.TransitionProbs+=BayesianModel(self.Previous,dict(((state,Distribution(dict(((state2,self.Previous(state)*self.Current(state2)) for state2 in self.Current.States())))) for state in self.Previous.States())))
+        for state in self.States():
+            self.Conditionals[state]+=ObservationProbs*self.Current(state)
+
+    def Train(self,Sequence):
+        """Trains the HMM from a sequence of observations"""
+        ObservableValues=self.Outcomes()
+        for (i,Obserservation) in enumerate(Sequence):
+            ObservationProbs=Distribution(dict(((Value,1 if Value==Observation else 0) for Value in ObservableValues)))
+            if i==0:
+                self.PriorProbs(ObservationProbs)
+                self.Prior+=self.Current
+                for state in self.States():
+                    self.Conditionals[state]+=ObservationProbs*self.Current(state)
+            else:
+                self.Update(ObservationProbs)
+            
+            
+
         
            
         
