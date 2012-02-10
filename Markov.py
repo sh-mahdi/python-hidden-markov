@@ -190,7 +190,7 @@ class BayesianModel(object):
         
     def MaximumLikelihoodOutcome(self,PriorProbs=None):
         """Returns the maximum likelihood outcome given PriorProbs"""
-        return self(PriorProbs).MaximumLikelihoodState()
+        return self.PriorProbs().MaximumLikelihoodState()
 
     def MaximumLikelihoodState(self,Observations=None)
         """Returns the maximum likelihood of the internal state. If Observations
@@ -233,13 +233,16 @@ class HMM(BayesianModel):
             self.Previous=self.Prior.copy()
         else:
             self.Previous=self.Current.copy()
-        self.Current=self.TransitionProbs(self.Current)
+        self.Current=self.TransitionProbs(self.Previous)
         return self.Current
 
     def PriorProbs(self,Observations):
         """Returns a Distribution the prior probabilities of the HMM's states
            given a Distribution of Observations"""
-        self.Current=super(HMM,self).PriorProbs(Observations)
+        if self.Current=None:
+            self.Current=super(HMM,self).PriorProbs(Observations)
+        else:
+            self.Current=Distribution((((state,self.Current(state)*sum((self.Conditionals[state](outcome)*Observations(outcome) for outcome in Observations.States())) for state in self.Current))))
         return self.Current
 
     def Update(self,Observations):
@@ -264,7 +267,35 @@ class HMM(BayesianModel):
                     self.Conditionals[state]+=ObservationProbs*self.Current(state)
             else:
                 self.Update(ObservationProbs)
-            
+
+    def Analyse(self,Sequence,MaximumLikelihood=False):
+        """Yields the an estimate of the internal states that generated a Sequence
+           of observed values, either as the Maximum Likelihood state
+           (Maximumlikelihood=True) or as a Distribution (MaximumLikelihood=False)"""
+        ObservableValues=self.Outcomes()
+        self.Current=None
+        for Observation in Sequence:
+            ObservationProbs=Distribution(dict(((Value,1 if Value==Observation else 0) for Value in ObservableValues)))
+            if MaximumLikelihood:
+                yield self.MaximumLikelihoodState(ObservationProbs)
+            else:
+                yield self.PriorProbs(ObservationProbs)
+            self.Predict()
+
+    def MaximumLikelihoodState(self,Observations=None):
+        """Returns the maximum likelihood of the internal state. If Observations
+           is None, defaults to the maximum likelihood of the the Current state, or
+           the Prior if self.Current is None"""
+        Probs=self.Current
+        if Probs==None:
+            Probs=self.Prior
+        if Observations!=None:
+            Probs=self.PriorProbs(Observations)
+        return Probs.MaximumLikelihoodState()
+
+    
+
+    
             
 
         
