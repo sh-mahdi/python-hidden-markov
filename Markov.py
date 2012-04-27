@@ -186,13 +186,13 @@ class BayesianModel(object):
     def PriorProbs(self,Observations):
         """Returns a Distribution representing the probabilities of the prior
            states, given a probability Distribution of Observations"""
-        return Distribution((((state,self.Priors(state)*sum((self.Conditionals[state](outcome)*Observations(outcome) for outcome in Observations.States())) for state in self.Priors))))
+        return Distribution(dict(((state,self.Priors(state)*sum((self.Conditionals[state](outcome)*Observations(outcome) for outcome in Observations.States()))) for state in self.Prior)))
         
     def MaximumLikelihoodOutcome(self,PriorProbs=None):
         """Returns the maximum likelihood outcome given PriorProbs"""
         return self.PriorProbs().MaximumLikelihoodState()
 
-    def MaximumLikelihoodState(self,Observations=None)
+    def MaximumLikelihoodState(self,Observations=None):
         """Returns the maximum likelihood of the internal state. If Observations
            is None, defaults to the maximum likelihood of the Prior"""
         Probs=self.Prior
@@ -239,10 +239,11 @@ class HMM(BayesianModel):
     def PriorProbs(self,Observations):
         """Returns a Distribution the prior probabilities of the HMM's states
            given a Distribution of Observations"""
-        if self.Current=None:
+        if self.Current==None:
             self.Current=super(HMM,self).PriorProbs(Observations)
         else:
-            self.Current=Distribution((((state,self.Current(state)*sum((self.Conditionals[state](outcome)*Observations(outcome) for outcome in Observations.States())) for state in self.Current))))
+            self.Current=Distribution(
+                dict(((state,self.Current(state)*sum((self.Conditionals[state](outcome)*Observations(outcome) for outcome in Observations.States()))) for state in self.Current)))
         return self.Current
 
     def Update(self,Observations):
