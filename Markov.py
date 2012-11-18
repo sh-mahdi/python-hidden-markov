@@ -47,7 +47,7 @@ class Distribution(object):
         """Gives the probability of item"""
         return self.Probs[item]()
 
-    def __mult__(self,scalar):
+    def __mul__(self,scalar):
         """Returns the probability of each item, multiplied by a scalar"""
         return dict([(item,self.Probs[item]()*scalar) for item in self.Probs])
 
@@ -74,7 +74,7 @@ class Distribution(object):
         for item in self.Probs:
             x=self(item)
             if x>p:
-                Seeling=False
+                Seeking=False
                 result=item
             else:
                 p-=x
@@ -118,7 +118,7 @@ class PoissonDistribution(Distribution):
         self.Denominator+=p
 
     def Mean(self):
-        """Returnns the Mean of the PoissonDistribution"""
+        """Returns the Mean of the PoissonDistribution"""
         return self.Numerator/self.Denominator
 
     def copy(self):
@@ -174,7 +174,7 @@ class BayesianModel(object):
             for outcome in posterior:
                 Outcomes.setdefault(outcome,0.0)
                 Outcomes[outcome]+=posterior[outcome]
-        return Distribution(outcomes)
+        return Distribution(Outcomes)
 
     def __iadd__(self,Model2):
         """Updates the BayesianModel with the data in another BayesianModel"""
@@ -186,11 +186,11 @@ class BayesianModel(object):
     def PriorProbs(self,Observations):
         """Returns a Distribution representing the probabilities of the prior
            states, given a probability Distribution of Observations"""
-        return Distribution(dict(((state,self.Priors(state)*sum((self.Conditionals[state](outcome)*Observations(outcome) for outcome in Observations.States()))) for state in self.Prior)))
+        return Distribution(dict(((state,self.Prior(state)*sum((self.Conditionals[state](outcome)*Observations(outcome) for outcome in Observations.States()))) for state in self.Prior.States())))
         
     def MaximumLikelihoodOutcome(self,PriorProbs=None):
         """Returns the maximum likelihood outcome given PriorProbs"""
-        return self.PriorProbs().MaximumLikelihoodState()
+        return self(PriorProbs).MaximumLikelihoodState()
 
     def MaximumLikelihoodState(self,Observations=None):
         """Returns the maximum likelihood of the internal state. If Observations
@@ -224,7 +224,7 @@ class HMM(BayesianModel):
            to self.Current if it is set, or self.Prior otherwise"""
         if PriorProbs==None:
             PriorProbs=self.Current
-        return super(HMM,self)(PriorProbs)
+        return super(HMM,self).__call__(PriorProbs)
 
     def Predict(self):
         """Returns a Distribution representing the probabilities of the next
@@ -243,7 +243,7 @@ class HMM(BayesianModel):
             self.Current=super(HMM,self).PriorProbs(Observations)
         else:
             self.Current=Distribution(
-                dict(((state,self.Current(state)*sum((self.Conditionals[state](outcome)*Observations(outcome) for outcome in Observations.States()))) for state in self.Current)))
+                dict(((state,self.Current(state)*sum((self.Conditionals[state](outcome)*Observations(outcome) for outcome in Observations.States()))) for state in self.Current.States())))
         return self.Current
 
     def Update(self,Observations):
@@ -254,13 +254,13 @@ class HMM(BayesianModel):
         self.Prior+=self.Current
         self.TransitionProbs+=BayesianModel(self.Previous,dict(((state,Distribution(dict(((state2,self.Previous(state)*self.Current(state2)) for state2 in self.Current.States())))) for state in self.Previous.States())))
         for state in self.States():
-            self.Conditionals[state]+=ObservationProbs*self.Current(state)
+            self.Conditionals[state]+=Observations[state]*self.Current(state)
 
     def Train(self,Sequence):
         """Trains the HMM from a sequence of observations"""
         ObservableValues=self.Outcomes()
-        for (i,Obserservation) in enumerate(Sequence):
-            ObservationProbs=Distribution(dict(((Value,1 if Value==Observation else 0) for Value in ObservableValues)))
+        for (i,Observation) in enumerate(Sequence):
+            ObservationProbs=Distribution(dict(((Value,1 if Value==Observation else 0) for Value in ObservableValues)),0)
             if i==0:
                 self.PriorProbs(ObservationProbs)
                 self.Prior+=self.Current
@@ -276,7 +276,7 @@ class HMM(BayesianModel):
         ObservableValues=self.Outcomes()
         self.Current=None
         for Observation in Sequence:
-            ObservationProbs=Distribution(dict(((Value,1 if Value==Observation else 0) for Value in ObservableValues)))
+            ObservationProbs=Distribution(dict(((Value,1 if Value==Observation else 0) for Value in ObservableValues)),0)
             if MaximumLikelihood:
                 yield self.MaximumLikelihoodState(ObservationProbs)
             else:
@@ -293,6 +293,9 @@ class HMM(BayesianModel):
         if Observations!=None:
             Probs=self.PriorProbs(Observations)
         return Probs.MaximumLikelihoodState()
+        
+    def Outcomes(self):
+        return super(HMM,self).__call__().States()
 
     
 
