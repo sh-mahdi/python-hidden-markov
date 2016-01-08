@@ -1,0 +1,1 @@
+Hidden Markov Models are a basic AI tool for analysing and predicting time sequences. This project will create a library for that allows Python programs to build, train and use HMMs.
